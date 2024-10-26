@@ -1,0 +1,58 @@
+import osmnx as ox
+import pandas as pd
+import networkx as nx
+
+# Şehir isimlerini tanımlıyoruz.
+cities = ["Istanbul, Turkey", "Izmir, Turkey", "Artvin, Turkey"]
+
+# Sadece kara yolları (motorlu taşıtlar için) filtrelemek için yol türleri
+road_types = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary',
+              'residential', 'unclassified', 'service']
+
+# Tüm şehirler için düğüm ve kenar bilgilerini toplamak
+for city in cities:
+    # Şehrin adını dosya isimlerinde kullanabilmek için düzenliyoruz (örn. "Istanbul")
+    city_name = city.split(",")[0].lower()
+
+    # Şehrin yol ağını sadece motorlu taşıtlar için olan yol türlerine göre alıyoruz
+    G = ox.graph_from_place(city, network_type='drive', custom_filter=f'["highway"~"{ "|".join(road_types) }"]')
+
+    # Ana bileşene bağlı olmayan izole kenarları ve düğümleri kaldırmak için grafı bileşenlerine ayıralım
+    largest_component = max(nx.strongly_connected_components(G), key=len)
+    G_subgraph = G.subgraph(largest_component).copy()
+
+    # Kenarlar ve düğümleri çıkaralım
+    all_nodes = []
+    all_edges = []
+
+    for u, v, data in G_subgraph.edges(data=True):
+        # Başlangıç ve bitiş düğümlerinin koordinatlarını alıyoruz
+        u_x, u_y = G_subgraph.nodes[u]['x'], G_subgraph.nodes[u]['y']
+        v_x, v_y = G_subgraph.nodes[v]['x'], G_subgraph.nodes[v]['y']
+
+        # Düğümler (tekil kayıtlar için)
+        all_nodes.append({'ID': u, 'x': u_x, 'y': u_y})
+        all_nodes.append({'ID': v, 'x': v_x, 'y': v_y})
+
+        # Kenarlar (tekil kayıtlar için, uzunluk 3 hane duyarlı)
+        edge_info = {
+            'u': u,
+            'v': v,
+            'length': round(data.get('length', 0), 3),  # Kenar uzunluğunu 3 hane duyarlı yapıyoruz
+            'oneway': data.get('oneway', False)
+        }
+        all_edges.append(edge_info)
+
+    # Düğümler DataFrame'ine dönüştürüp mükerrer kayıtları kaldırıyoruz
+    nodes_df = pd.DataFrame(all_nodes).drop_duplicates(subset='ID')
+
+    # Kenarları DataFrame'e dönüştürüp mükerrer kayıtları kaldırıyoruz
+    edges_df = pd.DataFrame(all_edges).drop_duplicates(subset=['u', 'v', 'length', 'oneway'])
+
+    # Düğümler dosyasını şehir ismiyle (cityname_nodes) kaydediyoruz (ID, enlem, boylam)
+    nodes_df.to_csv(f'{city_name}_nodes.csv', index=False)
+
+    # Kenarlar dosyasını şehir ismiyle (cityname_edges) kaydediyoruz (u, v, length, oneway)
+    edges_df.to_csv(f'{city_name}_edges.csv', index=False)
+
+    print(f"{city} için izole kenarlar ve düğümler çıkarıldı ve dosyalar kaydedildi.")
